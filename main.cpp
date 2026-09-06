@@ -1,11 +1,16 @@
 #include <cmath>
+#include <string>
+#include <numbers>
 #include "tgaimage.h"
+#include "model.h"
 
 constexpr TGAColor white   = {255, 255, 255, 255}; // attention, BGRA order
 constexpr TGAColor green   = {  0, 255,   0, 255};
 constexpr TGAColor red     = {  0,   0, 255, 255};
 constexpr TGAColor blue    = {255, 128,  64, 255};
 constexpr TGAColor yellow  = {  0, 200, 255, 255};
+constexpr TGAColor cyan    = {255, 255,   0, 255};
+constexpr TGAColor magenta = {255,   0, 255, 255};
 
 //Bresenham直线绘制算法，输入点对、image对象和直线颜色，画出直线
 void line(int ax,int ay,int bx,int by,TGAImage& framebuffer,TGAColor color){
@@ -46,23 +51,34 @@ void line(int ax,int ay,int bx,int by,TGAImage& framebuffer,TGAColor color){
     }
 }
 
+//线框渲染
+void wireframe_render(const std::string& file_path, TGAImage& framebuffer, int width, int height){
+    Model model;
+    if(!model.load_obj(file_path)) return;
+    std::vector<Eigen::Vector2f> scr_verticies;
+    //视口变换，把[-1,1]^2变换到[0,width]*[0,height]
+    for(const Eigen::Vector3f& v : model.verticies){
+        Eigen::Vector2f scr((v.x() + 1.0f) * width / 2 , (v.y() + 1.0f) * height / 2);
+        scr_verticies.push_back(scr);
+    }
+    for(const Eigen::Vector3i& f : model.face_verticies){
+        line(scr_verticies[f[0]].x(),scr_verticies[f[0]].y(),scr_verticies[f[1]].x(),scr_verticies[f[1]].y(),framebuffer,cyan);
+        line(scr_verticies[f[1]].x(),scr_verticies[f[1]].y(),scr_verticies[f[2]].x(),scr_verticies[f[2]].y(),framebuffer,cyan);
+        line(scr_verticies[f[2]].x(),scr_verticies[f[2]].y(),scr_verticies[f[0]].x(),scr_verticies[f[0]].y(),framebuffer,cyan);
+    }
+    for(const Eigen::Vector2f& v : scr_verticies)
+    {
+        framebuffer.set(v.x(),v.y(),magenta);
+    }
+}
+
 int main(int argc, char** argv) {
-    constexpr int width  = 64;
-    constexpr int height = 64;
+    constexpr int width  = 1024;
+    constexpr int height = 1024;
     TGAImage framebuffer(width, height, TGAImage::RGB);
 
-    int ax =  7, ay =  3;
-    int bx = 12, by = 37;
-    int cx = 62, cy = 53;
+    wireframe_render("obj/diablo3_pose/diablo3_pose.obj",framebuffer,width,height);
 
-    line(ax, ay, bx, by, framebuffer, blue);
-    line(cx, cy, bx, by, framebuffer, green);
-    line(cx, cy, ax, ay, framebuffer, yellow);
-    line(ax, ay, cx, cy, framebuffer, red);
-
-    framebuffer.set(ax, ay, white);
-    framebuffer.set(bx, by, white);
-    framebuffer.set(cx, cy, white);
     framebuffer.write_tga_file("framebuffer.tga");
     return 0;
 }

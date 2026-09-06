@@ -1,3 +1,5 @@
 build/
 obj/
+.vscode/
+exp/
 /make.bat
