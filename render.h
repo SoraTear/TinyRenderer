@@ -5,3 +5,5 @@
 
 void line(int ax,int ay,int bx,int by,TGAImage& framebuffer,TGAColor color);
 void wireframe_render(const std::string& file_path, TGAImage& framebuffer, int width, int height,const TGAColor& ecolor,const TGAColor& vcolor);
+void triangle(int ax, int ay, int bx, int by, int cx, int cy, TGAImage &framebuffer, TGAColor color);
+void triangle_render(const std::string& file_path, TGAImage& framebuffer, int width, int height);

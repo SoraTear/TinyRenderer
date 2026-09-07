@@ -8,12 +8,14 @@ constexpr TGAColor yellow  = {  0, 200, 255, 255};
 constexpr TGAColor cyan    = {255, 255,   0, 255};
 constexpr TGAColor magenta = {255,   0, 255, 255};
 
+
+
 int main(int argc, char** argv) {
     constexpr int width  = 1024;
     constexpr int height = 1024;
     TGAImage framebuffer(width, height, TGAImage::RGB);
 
-    wireframe_render("obj/diablo3_pose/diablo3_pose.obj",framebuffer,width,height,cyan,magenta);
+    triangle_render("obj/african_head/african_head.obj",framebuffer,width,height);
 
     framebuffer.write_tga_file("framebuffer.tga");
     return 0;
