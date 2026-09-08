@@ -11,11 +11,15 @@ constexpr TGAColor magenta = {255,   0, 255, 255};
 
 
 int main(int argc, char** argv) {
-    constexpr int width  = 1024;
-    constexpr int height = 1024;
+    constexpr int width  = 64;
+    constexpr int height = 64;
     TGAImage framebuffer(width, height, TGAImage::RGB);
 
-    triangle_render("obj/african_head/african_head.obj",framebuffer,width,height);
+    int ax = 17, ay =  4;
+    int bx = 55, by = 39;
+    int cx = 23, cy = 59;
+
+    triangle(ax, ay, red, bx, by, blue, cx, cy, green, framebuffer);
 
     framebuffer.write_tga_file("framebuffer.tga");
     return 0;
