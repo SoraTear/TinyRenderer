@@ -68,7 +68,7 @@ float triangle_signed_area(int ax,int ay,int bx,int by,int cx,int cy){
 }
 
 //带背面剔除的三角形光栅化
-void triangle(int ax, int ay,TGAColor a_color, int bx, int by,TGAColor b_color, int cx, int cy,TGAColor c_color, TGAImage &framebuffer) {
+void triangle(int ax, int ay,int az, int bx, int by, int bz, int cx, int cy, int cz, TGAImage& framebuffer, TGAImage& zbuffer, TGAColor color) {
     //计算包围盒，减少计算量
     std::vector<Eigen::Vector2i> bouding_box;
     bouding_box.push_back(Eigen::Vector2i(std::min(ax,std::min(bx,cx)),std::min(ay,std::min(by,cy))));
@@ -85,12 +85,29 @@ void triangle(int ax, int ay,TGAColor a_color, int bx, int by,TGAColor b_color, 
             float beta = triangle_signed_area(ax,ay,x,y,cx,cy) / S_abc;
             float gamma = triangle_signed_area(ax,ay,bx,by,x,y) / S_abc;
             if(alpha < 0 || beta < 0 || gamma < 0)continue;
-            TGAColor c;
-            //插值各通道颜色
-            for (int i = 0; i < 3; i++){
-                c[i] = static_cast<uint8_t>(a_color[i] * alpha + b_color[i] * beta + c_color[i] * gamma);
-            }
-            framebuffer.set(x,y,c);
+            uint8_t z = static_cast<uint8_t>(az * alpha + bz * beta + cz * gamma);
+            if(z <= zbuffer.get(x,y).bgra[0]) continue;
+            zbuffer.set(x,y,{z});
+            framebuffer.set(x,y,color);
         }    
+    }
+}
+
+//三角形渲染
+void triangle_render(const std::string& file_path, TGAImage& framebuffer, TGAImage& zbuffer, int width, int height){
+    Model model;
+    if(!model.load_obj(file_path)) return;
+    std::vector<Eigen::Vector3f> scr_verticies;
+    //视口变换，把[-1,1]^2变换到[0,width]*[0,height]
+    for(const Eigen::Vector3f& v : model.verticies){
+        Eigen::Vector3f scr((v.x() + 1.0f) * width / 2.0f , (v.y() + 1.0f) * height / 2.0f, (v.z() + 1.0f) * 255 / 2.0f);
+        scr_verticies.push_back(scr);
+    }
+    for(const Eigen::Vector3i& f : model.face_verticies){
+        TGAColor rc = {static_cast<std::uint8_t>(std::rand() % 256),static_cast<std::uint8_t>(std::rand() % 256),static_cast<std::uint8_t>(std::rand() % 256),255};
+        triangle(scr_verticies[f[0]].x(),scr_verticies[f[0]].y(),scr_verticies[f[0]].z(),
+                 scr_verticies[f[1]].x(),scr_verticies[f[1]].y(),scr_verticies[f[1]].z(),
+                 scr_verticies[f[2]].x(),scr_verticies[f[2]].y(),scr_verticies[f[1]].z(),
+                 framebuffer, zbuffer ,rc);
     }
 }
