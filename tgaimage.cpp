@@ -220,7 +220,7 @@ TGAColor TGAImage::get(const int x, const int y) const {
 
 void TGAImage::set(int x, int y, const TGAColor &c) {
     if (!data.size() || x<0 || y<0 || x>=w || y>=h) return;
-    //memcpy(target,source,memsize)
+    //memcpy(target,source,bytenum)
     memcpy(data.data()+(x+y*w)*bpp, c.bgra, bpp);
 }
 

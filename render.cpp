@@ -94,24 +94,25 @@ void wireframe_render(const std::string& file_path, TGAImage& framebuffer, int w
 
 
 //有符号三角形面积
-float triangle_signed_area(int ax,int ay,int bx,int by,int cx,int cy){
-    float ret = 0.5f * static_cast<float>((bx - ax) * (cy - ay) - (by - ay) * (cx - ax));
+float triangle_signed_area(float ax,float ay,float bx,float by,float cx,float cy){
+    float ret = 0.5f * ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax));
     return ret;
 }
 
 //带背面剔除的三角形光栅化
-void triangle(int ax, int ay,float az, int bx, int by, float bz, int cx, int cy, float cz, TGAImage& framebuffer, ZBuffer& zbuffer, TGAColor color) {
+void triangle(float ax, float ay,float az, float bx, float by, float bz, float cx, float cy, float cz, TGAImage& framebuffer, ZBuffer& zbuffer, TGAColor color) {
     //计算包围盒，减少计算量
-    std::vector<Eigen::Vector2i> bouding_box;
-    bouding_box.push_back(Eigen::Vector2i(std::min(ax,std::min(bx,cx)),std::min(ay,std::min(by,cy))));
-    bouding_box.push_back(Eigen::Vector2i(std::max(ax,std::max(bx,cx)),std::max(ay,std::max(by,cy))));
+    std::vector<Eigen::Vector2f> bouding_box;
+    bouding_box.push_back(Eigen::Vector2f(std::min(ax,std::min(bx,cx)),std::min(ay,std::min(by,cy))));
+    bouding_box.push_back(Eigen::Vector2f(std::max(ax,std::max(bx,cx)),std::max(ay,std::max(by,cy))));
     float S_abc = triangle_signed_area(ax,ay,bx,by,cx,cy);
-    //背面剔除，.obj格式规定顶点逆时针排列（优化）
-    if(S_abc < 1) return;
+    //背面剔除，不忽略小三角形，.obj格式规定顶点逆时针排列（优化）
+    if(S_abc < 0.0f) return;
     //多线程处理
     #pragma omp parallel for
-    for(int x = bouding_box[0][0]; x <= bouding_box[1][0]; x++){
-        for(int y = bouding_box[0][1]; y <= bouding_box[1][1]; y++){
+    //限制包围盒最大范围
+    for(int y = std::max<int>(bouding_box[0][1],0); y <= std::min<int>(bouding_box[1][1],framebuffer.height()-1); y++){
+        for(int x = std::max<int>(bouding_box[0][0],0); x <= std::min<int>(bouding_box[1][0],framebuffer.width()-1); x++){
             //重心坐标
             float alpha = triangle_signed_area(x,y,bx,by,cx,cy) / S_abc;
             float beta = triangle_signed_area(ax,ay,x,y,cx,cy) / S_abc;
@@ -127,34 +128,64 @@ void triangle(int ax, int ay,float az, int bx, int by, float bz, int cx, int cy,
 }
 
 //单轴旋转矩阵，0=x,1=y,2=z
-Eigen::Matrix3f get_rotation_matrix(int axis,float degree){
-    Eigen::Matrix3f rotation;
+Eigen::Matrix4f get_rotation_matrix(int axis,float degree){
+    Eigen::Matrix4f rotation;
     float rad_deg = degree * std::numbers::pi_v<float>/ 180.0f;
     switch (axis){
     case 0:
-        rotation << 1,0,0,
-                    0,std::cos(rad_deg),-std::sin(rad_deg),
-                    0,std::sin(rad_deg),std::cos(rad_deg);
+        rotation << 1,0,0,0,
+                    0,std::cos(rad_deg),-std::sin(rad_deg),0,
+                    0,std::sin(rad_deg),std::cos(rad_deg),0,
+                    0,0,0,1;
         return rotation;
     case 1:
-        rotation << std::cos(rad_deg),0,std::sin(rad_deg),
-                    0,1,0,
-                    -std::sin(rad_deg),0,std::cos(rad_deg);
+        rotation << std::cos(rad_deg),0,std::sin(rad_deg),0,
+                    0,1,0,0,
+                    -std::sin(rad_deg),0,std::cos(rad_deg),0,
+                    0,0,0,1;
         return rotation;
     case 2:
-        rotation << std::cos(rad_deg),-std::sin(rad_deg),0,
-                    std::sin(rad_deg),std::cos(rad_deg),0,
-                    0,0,1;
+        rotation << std::cos(rad_deg),-std::sin(rad_deg),0,0,
+                    std::sin(rad_deg),std::cos(rad_deg),0,0,
+                    0,0,1,0,
+                    0,0,0,1;
         return rotation;
     default:
-        return Eigen::Matrix3f::Identity();
+        return Eigen::Matrix4f::Identity();
     }
 }
 
-//做透视除法，硬编码相机位置，返回透视除法后的点
-Eigen::Vector3f perspective(Eigen::Vector3f v){
-    constexpr float campos_z = 3.0f;
-    return v / (1 - v.z() / campos_z);
+//视图变换矩阵，将世界坐标系转换到相机坐标系
+Eigen::Matrix4f get_view_matrix(const Eigen::Vector3f& campos,const Eigen::Vector3f& center,const Eigen::Vector3f& up){
+    Eigen::Matrix4f view;
+    Eigen::Vector3f n = (campos - center).normalized();
+    Eigen::Vector3f l = up.cross(n).normalized();
+    Eigen::Vector3f m = n.cross(l).normalized();
+    view << l.x(),l.y(),l.z(),-l.dot(center),
+            m.x(),m.y(),m.z(),-m.dot(center),
+            n.x(),n.y(),n.z(),-n.dot(center),
+            0,0,0,1;
+    return view;
+}
+
+//透视除法矩阵，约定投影平面为z=0，distance为视口变换后相机到投影平面的距离
+Eigen::Matrix4f get_projection_matrix(const float distance){
+    Eigen::Matrix4f projection;
+    projection << 1,0,0,0,
+                  0,1,0,0,
+                  0,0,1,0,
+                  0,0,-1.0f/distance,1;
+    return projection;
+}
+
+//视口变换矩阵，(x,y)为视口左下角坐标，将[-1,1]^2的NDC x,y坐标映射到指定视口空间
+Eigen::Matrix4f get_viewport_matrix(int x,int y,int width,int height){
+    Eigen::Matrix4f viewport;
+    viewport << width/2.0f,0,0,x+width/2.0f,
+                0,height/2.0f,0,y+height/2.0f,
+                0,0,1,0,
+                0,0,0,1;
+    return viewport;
 }
 
 //三角形渲染
@@ -162,11 +193,19 @@ void triangle_render(const std::string& file_path, TGAImage& framebuffer, ZBuffe
     Model model;
     if(!model.load_obj(file_path)) return;
     std::vector<Eigen::Vector3f> scr_verticies;
-    for(const Eigen::Vector3f& v : model.verticies){
-        //模型变换：旋转
-        Eigen::Vector3f vertex = perspective(get_rotation_matrix(1,30.0f) * v);
-        //视口变换，把[-1,1]^2变换到[0,width]*[0,height]
-        Eigen::Vector3f scr((vertex.x() + 1.0f) * width / 2.0f , (vertex.y() + 1.0f) * height / 2.0f, vertex.z());
+    Eigen::Vector3f campos(-1,0,2);
+    Eigen::Vector3f center(0,0,0);
+    Eigen::Vector3f up(0,1,0);
+    Eigen::Matrix4f v = get_view_matrix(campos,center,up);
+    Eigen::Matrix4f p = get_projection_matrix((center - campos).norm());
+    Eigen::Matrix4f vp = get_viewport_matrix(width/16,height/16,width * 7/8,height * 7/8);
+    for(const Eigen::Vector3f& vertex : model.verticies){
+        //裁剪空间坐标，未进行透视除法
+        Eigen::Vector4f clip = p * v * Eigen::Vector4f(vertex.x(),vertex.y(),vertex.z(),1.0f);
+        //NDC坐标，进行了透视除法
+        Eigen::Vector4f ndc = clip/clip.w();
+        //平面空间坐标，进行了视口变换
+        Eigen::Vector3f scr = (vp * ndc).head<3>();
         scr_verticies.push_back(scr);
     }
     for(const Eigen::Vector3i& f : model.face_verticies){
