@@ -14,12 +14,11 @@ int main(int argc, char** argv) {
     constexpr int width  = 1024;
     constexpr int height = 1024;
     TGAImage framebuffer(width, height, TGAImage::RGB);
-    TGAImage zbuffer(width, height, TGAImage::GRAYSCALE);
+    ZBuffer zbuffer(width,height);
 
     triangle_render("obj/diablo3_pose/diablo3_pose.obj",framebuffer,zbuffer,width,height);
 
-    zbuffer.write_tga_file("zbuffer.tga");
     framebuffer.write_tga_file("framebuffer.tga");
+    zbuffer.toTGAImage().write_tga_file("zbuffer.tga");
     return 0;
 }
-

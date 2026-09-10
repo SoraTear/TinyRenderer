@@ -1,5 +1,36 @@
 #include "render.h"
-#include "model.h"
+
+ZBuffer::ZBuffer(int width,int height) : width(width),height(height),data(width*height,-std::numeric_limits<float>::infinity()){}
+
+void ZBuffer::set(const int x,const int y,const float value){
+    if (!data.size() || x<0 || y<0 || x>=width || y>=height) return;
+    data[x + y*width] = value;
+}
+
+float ZBuffer::get(const int x,const int y) const {
+    if (!data.size() || x<0 || y<0 || x>=width || y>=height) return -std::numeric_limits<float>::infinity();
+    return data[x + y*width];
+}
+
+TGAImage ZBuffer::toTGAImage(){
+    TGAImage img(width,height,TGAImage::GRAYSCALE);
+    float zmin = std::numeric_limits<float>::infinity();
+    float zmax = -std::numeric_limits<float>::infinity();
+    for(float z : data){
+        if (!std::isfinite(z)) continue;
+        zmin = std::min(zmin,z);
+        zmax = std::max(zmax,z);
+    }
+    for(int y = 0; y < height; y++){
+        for (int x = 0; x < width; x++){
+            float z = data[x+y*width];
+            if (!std::isfinite(z)) continue;
+            TGAColor color = {static_cast<uint8_t>((zmin<zmax ? (z-zmin)/(zmax-zmin) : 1.0f) * 255.0f)};
+            img.set(x,y,color);
+        }
+    }
+    return img;
+}
 
 //Bresenham直线绘制算法，输入点对、image对象和直线颜色，画出直线
 void line(int ax,int ay,int bx,int by,TGAImage& framebuffer,TGAColor color){
@@ -61,6 +92,7 @@ void wireframe_render(const std::string& file_path, TGAImage& framebuffer, int w
     }
 }
 
+
 //有符号三角形面积
 float triangle_signed_area(int ax,int ay,int bx,int by,int cx,int cy){
     float ret = 0.5f * static_cast<float>((bx - ax) * (cy - ay) - (by - ay) * (cx - ax));
@@ -68,13 +100,13 @@ float triangle_signed_area(int ax,int ay,int bx,int by,int cx,int cy){
 }
 
 //带背面剔除的三角形光栅化
-void triangle(int ax, int ay,int az, int bx, int by, int bz, int cx, int cy, int cz, TGAImage& framebuffer, TGAImage& zbuffer, TGAColor color) {
+void triangle(int ax, int ay,float az, int bx, int by, float bz, int cx, int cy, float cz, TGAImage& framebuffer, ZBuffer& zbuffer, TGAColor color) {
     //计算包围盒，减少计算量
     std::vector<Eigen::Vector2i> bouding_box;
     bouding_box.push_back(Eigen::Vector2i(std::min(ax,std::min(bx,cx)),std::min(ay,std::min(by,cy))));
     bouding_box.push_back(Eigen::Vector2i(std::max(ax,std::max(bx,cx)),std::max(ay,std::max(by,cy))));
     float S_abc = triangle_signed_area(ax,ay,bx,by,cx,cy);
-    //背面剔除，.obj格式规定顶点逆时针排列
+    //背面剔除，.obj格式规定顶点逆时针排列（优化）
     if(S_abc < 1) return;
     //多线程处理
     #pragma omp parallel for
@@ -85,29 +117,63 @@ void triangle(int ax, int ay,int az, int bx, int by, int bz, int cx, int cy, int
             float beta = triangle_signed_area(ax,ay,x,y,cx,cy) / S_abc;
             float gamma = triangle_signed_area(ax,ay,bx,by,x,y) / S_abc;
             if(alpha < 0 || beta < 0 || gamma < 0)continue;
-            uint8_t z = static_cast<uint8_t>(az * alpha + bz * beta + cz * gamma);
-            if(z <= zbuffer.get(x,y).bgra[0]) continue;
-            zbuffer.set(x,y,{z});
+            //深度，当前设定下值越大深度越小
+            float z = az * alpha + bz * beta + cz * gamma;
+            if(z <= zbuffer.get(x,y)) continue;
+            zbuffer.set(x,y,z);
             framebuffer.set(x,y,color);
         }    
     }
 }
 
+//单轴旋转矩阵，0=x,1=y,2=z
+Eigen::Matrix3f get_rotation_matrix(int axis,float degree){
+    Eigen::Matrix3f rotation;
+    float rad_deg = degree * std::numbers::pi_v<float>/ 180.0f;
+    switch (axis){
+    case 0:
+        rotation << 1,0,0,
+                    0,std::cos(rad_deg),-std::sin(rad_deg),
+                    0,std::sin(rad_deg),std::cos(rad_deg);
+        return rotation;
+    case 1:
+        rotation << std::cos(rad_deg),0,std::sin(rad_deg),
+                    0,1,0,
+                    -std::sin(rad_deg),0,std::cos(rad_deg);
+        return rotation;
+    case 2:
+        rotation << std::cos(rad_deg),-std::sin(rad_deg),0,
+                    std::sin(rad_deg),std::cos(rad_deg),0,
+                    0,0,1;
+        return rotation;
+    default:
+        return Eigen::Matrix3f::Identity();
+    }
+}
+
+//做透视除法，硬编码相机位置，返回透视除法后的点
+Eigen::Vector3f perspective(Eigen::Vector3f v){
+    constexpr float campos_z = 3.0f;
+    return v / (1 - v.z() / campos_z);
+}
+
 //三角形渲染
-void triangle_render(const std::string& file_path, TGAImage& framebuffer, TGAImage& zbuffer, int width, int height){
+void triangle_render(const std::string& file_path, TGAImage& framebuffer, ZBuffer& zbuffer, int width, int height){
     Model model;
     if(!model.load_obj(file_path)) return;
     std::vector<Eigen::Vector3f> scr_verticies;
-    //视口变换，把[-1,1]^2变换到[0,width]*[0,height]
     for(const Eigen::Vector3f& v : model.verticies){
-        Eigen::Vector3f scr((v.x() + 1.0f) * width / 2.0f , (v.y() + 1.0f) * height / 2.0f, (v.z() + 1.0f) * 255 / 2.0f);
+        //模型变换：旋转
+        Eigen::Vector3f vertex = perspective(get_rotation_matrix(1,30.0f) * v);
+        //视口变换，把[-1,1]^2变换到[0,width]*[0,height]
+        Eigen::Vector3f scr((vertex.x() + 1.0f) * width / 2.0f , (vertex.y() + 1.0f) * height / 2.0f, vertex.z());
         scr_verticies.push_back(scr);
     }
     for(const Eigen::Vector3i& f : model.face_verticies){
         TGAColor rc = {static_cast<std::uint8_t>(std::rand() % 256),static_cast<std::uint8_t>(std::rand() % 256),static_cast<std::uint8_t>(std::rand() % 256),255};
         triangle(scr_verticies[f[0]].x(),scr_verticies[f[0]].y(),scr_verticies[f[0]].z(),
                  scr_verticies[f[1]].x(),scr_verticies[f[1]].y(),scr_verticies[f[1]].z(),
-                 scr_verticies[f[2]].x(),scr_verticies[f[2]].y(),scr_verticies[f[1]].z(),
+                 scr_verticies[f[2]].x(),scr_verticies[f[2]].y(),scr_verticies[f[2]].z(),
                  framebuffer, zbuffer ,rc);
     }
 }
