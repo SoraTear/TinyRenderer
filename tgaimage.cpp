@@ -251,3 +251,6 @@ int TGAImage::height() const {
     return h;
 }
 
+int TGAImage::get_bpp() const {
+    return static_cast<int>(bpp);
+}

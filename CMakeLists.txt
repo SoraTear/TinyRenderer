@@ -21,7 +21,7 @@ endif()
 
 find_package(OpenMP COMPONENTS CXX)
 
-set(SOURCES main.cpp tgaimage.cpp model.cpp rasterizer.cpp)
+set(SOURCES main.cpp tgaimage.cpp model.cpp rasterizer.cpp shader.cpp)
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 

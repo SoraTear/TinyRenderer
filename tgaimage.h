@@ -52,6 +52,7 @@ struct TGAImage {
     int width()  const;
     //获取图像高
     int height() const;
+    int get_bpp() const;
 private:
     //接收输入流引用，辅助read_tga_file读取压缩的文件到data
     bool   load_rle_data(std::ifstream &in);
